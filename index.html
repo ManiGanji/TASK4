@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Annotation Tool</title>
+    <style>
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); z-index: 1000; }
+        .modal-content { position: relative; background-color: #fefefe; margin: 2% auto; padding: 20px; width: 90%; max-width: 1200px; border-radius: 8px; }
+        .close { position: absolute; right: 20px; top: 10px; font-size: 28px; cursor: pointer; }
+        #canvas-container { position: relative; margin: 20px 0; overflow: auto; }
+        canvas { border: 1px solid #ccc; max-width: 100%; }
+        .toolbar { margin-bottom: 20px; }
+        .description-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); z-index: 1100; }
+        button { padding: 8px 16px; margin: 0 5px; border: none; border-radius: 4px; background-color: #4CAF50; color: white; cursor: pointer; }
+        button:hover { background-color: #45a049; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <label>upload image:</label>
+        
+        <input type="file" id="imageUpload" accept="image/*" style="display: none;">
+        <button onclick="document.getElementById('imageUpload').click()">Upload Image</button>
+    </div>
+
+    <div id="imageModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <div class="toolbar">
+                <button onclick="setMode('rectangle')">Rectangle Mode</button>
+                <button onclick="clearLastAnnotation()">Undo Last</button>
+                <button onclick="submitAnnotations()">Submit</button>
+            </div>
+            <div id="canvas-container">
+                <canvas id="imageCanvas"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="descriptionModal" class="description-modal">
+        <h3>Add Description</h3>
+        <textarea id="annotationDescription" rows="4" cols="50"></textarea>
+        <button onclick="saveDescription()">Save Description</button>
+    </div>
+
+
+    <script>
+        const canvas = document.getElementById('imageCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        let startX, startY;
+        let currentMode = 'rectangle';
+        let annotations = [];
+        let currentImage = null;
+        let currentImageId = null;  // Variable to store the image ID
+
+        document.getElementById('imageUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const img = new Image();
+                    img.onload = function() {
+                        currentImage = img;
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx.drawImage(img, 0, 0);
+                        document.getElementById('imageModal').style.display = 'block';
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+
+                // Upload the image and get the image ID
+                uploadImage(file);
+            }
+        });
+
+        function uploadImage(file) {
+            const formData = new FormData();
+            formData.append('image', file);
+
+            fetch('upload.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentImageId = data.imageId;  // Store the image ID
+                    console.log('Image uploaded successfully with ID:', currentImageId);
+                } else {
+                    alert('Error uploading image: ' + data.error);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+        }
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', endDrawing);
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+
+            redrawCanvas();
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+
+            const width = currentX - startX;
+            const height = currentY - startY;
+            ctx.strokeRect(startX, startY, width, height);
+        }
+
+        function endDrawing(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+
+            const currentAnnotation = {
+                coords: {
+                    x: startX,
+                    y: startY,
+                    width: endX - startX,
+                    height: endY - startY
+                }
+            };
+
+            document.getElementById('descriptionModal').style.display = 'block';
+            annotations.push(currentAnnotation);
+        }
+
+        function saveDescription() {
+            const description = document.getElementById('annotationDescription').value;
+            if (description) {
+                const lastAnnotation = annotations[annotations.length - 1];
+                lastAnnotation.description = description;
+
+                // Clear the description input
+                document.getElementById('annotationDescription').value = '';
+                document.getElementById('descriptionModal').style.display = 'none';
+            }
+        }
+
+        function clearLastAnnotation() {
+            annotations.pop();
+            redrawCanvas();
+        }
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(currentImage, 0, 0);
+            annotations.forEach(annotation => {
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 2;
+                const { x, y, width, height } = annotation.coords;
+                ctx.strokeRect(x, y, width, height);
+            });
+        }
+
+        function submitAnnotations() {
+            const base64Image = canvas.toDataURL('image/png'); // Get the base64 image from the canvas
+            const data = {
+                imageId: currentImageId,  // Use the stored image ID
+                annotations: annotations,
+                annotated_image: base64Image // Include the annotated image in the payload
+            };
+
+            fetch('save_annotations.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Annotations saved successfully!');
+                    closeModal();
+                } else {
+                    alert('Error saving annotations: ' + data.error);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+            // Reset canvas and annotations
+            canvas.width = 0;
+            canvas.height = 0;
+            annotations = [];
+            currentImage = null;
+            currentImageId = null;  // Reset the image ID
+        }
+        
+    </script>
+</body>
+</html>
